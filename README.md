@@ -2,7 +2,7 @@
 
 <img src="./assets/stage9-harness-hero.png" alt="Stage 9 Multi-Agent Software Engineering Harness" width="100%" />
 
-# Stage 9 · Multi-Agent Software Engineering Harness
+# Multi-Agent Software Engineering Harness
 
 **基于 LangGraph 自主构建的 7-Agent 软件工程协作系统**
 
@@ -57,8 +57,8 @@
 ### 当前完成度
 
 ```text
-Stage 9       [■■■■■]  Core Multi-Agent Harness
-Stage 9 Plus  [■■■■■]  Memory · Multi-project · ToolRegistry · Exa MCP
+Stage        [■■■■■]  Core Multi-Agent Harness
+Stage  Plus  [■■■■■]  Memory · Multi-project · ToolRegistry · Exa MCP
 Status        completed
 ```
 
