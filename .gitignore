@@ -1,0 +1,9 @@
+.venv/
+.python/
+.uv-cache/
+.env
+__pycache__/
+.pytest_cache/
+*.pyc
+data/
+practice_sandbox/data/

@@ -1,0 +1,94 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Codex — OpenAI 的代码生成模型</title>
+    <link rel="stylesheet" href="style.css">
+</head>
+<body>
+    <header>
+        <h1>Codex</h1>
+        <p>OpenAI 开发的、专为理解与生成代码而优化的语言模型</p>
+    </header>
+
+    <main>
+        <section id="what">
+            <h2>什么是 Codex？</h2>
+            <p>Codex 是 OpenAI 在 2021 年发布的闭源代码专用大语言模型，基于 GPT-3 架构深度微调而来。它被训练于数十亿行公开 GitHub 代码，能理解自然语言指令并输出高质量、可执行的代码（支持 Python、JavaScript、Ruby、TypeScript、Shell 等十余种主流语言）。</p>
+            <p>其核心定位是<strong>开发者协作者</strong>——不是替代程序员，而是加速重复编码、解释遗留代码、生成测试桩、补全函数逻辑等高价值辅助任务。</p>
+        </section>
+
+        <section id="history">
+            <h2>发展脉络</h2>
+            <ul>
+                <li><strong>2021 年 8 月</strong>：OpenAI 宣布 Codex，并开放 API 试用（仅限受邀开发者）；GitHub Copilot 基于 Codex 构建并同步发布。</li>
+                <li><strong>2021 年 12 月</strong>：Codex API 正式向所有付费开发者开放，提供多种尺寸模型（如 <code>code-davinci-002</code>）。</li>
+                <li><strong>2023 年起</strong>：随着 GPT-4 和后续更通用、更强的多模态/代码模型（如 GPT-4 Turbo、o1）发布，Codex 系列逐步停止维护与新功能开发；API 于 2024 年正式下线。</li>
+            </ul>
+        </section>
+
+        <section id="capabilities">
+            <h2>核心能力</h2>
+            <ul>
+                <li>✅ 将自然语言描述（如“写一个 Python 函数，计算斐波那契数列前 n 项”）准确转译为可运行代码</li>
+                <li>✅ 基于上下文自动补全整行、整函数甚至整文件级代码</li>
+                <li>✅ 解释复杂代码片段的功能与逻辑（支持中英文注释生成）</li>
+                <li>✅ 将代码从一种语言翻译为另一种（如 Python → JavaScript）</li>
+                <li>✅ 为现有函数自动生成单元测试用例</li>
+                <li>✅ 根据错误信息建议修复方案（stack trace 分析）</li>
+            </ul>
+        </section>
+
+        <section id="vs-copilot">
+            <h2>Codex 与 GitHub Copilot 的关系</h2>
+            <table>
+                <thead>
+                    <tr>
+                        <th>维度</th>
+                        <th>Codex</th>
+                        <th>GitHub Copilot</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    <tr>
+                        <td><strong>本质</strong></td>
+                        <td>底层 AI 模型（API 服务）</td>
+                        <td>面向终端开发者的 IDE 插件产品（基于 Codex 构建）</td>
+                    </tr>
+                    <tr>
+                        <td><strong>使用方式</strong></td>
+                        <td>通过 HTTP API 调用，需集成至自有工具链</td>
+                        <td>直接在 VS Code、JetBrains 等编辑器中启用，零配置</td>
+                    </tr>
+                    <tr>
+                        <td><strong>定制性</strong></td>
+                        <td>高（可 fine-tune、控制 temperature、max_tokens 等参数）</td>
+                        <td>低（由 GitHub 统一管理提示工程与策略）</td>
+                    </tr>
+                    <tr>
+                        <td><strong>可见性</strong></td>
+                        <td>开发者可见模型 ID（如 <code>code-davinci-002</code>）</td>
+                        <td>用户无感，不暴露底层模型细节</td>
+                    </tr>
+                </tbody>
+            </table>
+        </section>
+
+        <section id="limits">
+            <h2>已知技术边界</h2>
+            <ul>
+                <li>⚠️ <strong>不保证 100% 正确性</strong>：生成代码需人工审查与测试，尤其涉及安全、金融、并发等关键逻辑时</li>
+                <li>⚠️ <strong>缺乏真实运行时环境感知</strong>：无法访问数据库、网络或当前项目依赖版本，可能生成过时或不可用的 API 调用</li>
+                <li>⚠️ <strong>长上下文理解有限</strong>：原始 Codex 最大上下文约 8k tokens，对超大型文件或跨文件逻辑推理能力较弱</li>
+                <li>⚠️ <strong>训练数据截止于 2021 年</strong>：不了解此后发布的框架特性（如 React 18 Hooks、Rust 2021 Edition 新语法）</li>
+                <li>⚠️ <strong>不支持私有代码库增强</strong>：原始 Codex 无法接入企业内部代码知识库（此能力由后续 RAG 或 fine-tuning 方案补充）</li>
+            </ul>
+        </section>
+    </main>
+
+    <footer>
+        <p>© 2024 OpenAI. Codex 技术报告与官方博客存档整理 | <a href="https://openai.com/research/codex">OpenAI Research Page</a> | <a href="https://github.blog/2021-08-05-github-copilot-ai-pair-programmer/">GitHub Copilot Announcement</a></p>
+    </footer>
+</body>
+</html>
