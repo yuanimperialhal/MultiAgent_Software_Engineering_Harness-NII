@@ -1,502 +1,243 @@
-# 第九阶段：应用级 Multi-Agent Harness + Stage 9 Plus
+<div align="center">
 
-状态：已完成
+<img src="./assets/stage9-harness-hero.png" alt="Stage 9 Multi-Agent Software Engineering Harness" width="100%" />
 
-```text
-第九阶段：[■■■■■]
-最终检查点：核心 Harness、连续聊天、Checkpoint、滚动摘要、多项目管理、本地 Tool 自动发现、ToolRegistry、Exa 远程 MCP 和按角色最小权限注入均已完成真实验收
-```
+# Stage 9 · Multi-Agent Software Engineering Harness
 
-这一阶段学习的不是如何使用 Codex 插件，而是如何在自己的 Python 应用中真正实现一套 Multi-Agent 系统：Main Agent 负责协调，多个专业 Agent 分工处理任务，Pydantic 契约负责交接，Python 负责文件、测试和路由等确定性操作。
+**基于 LangGraph 自主构建的 7-Agent 软件工程协作系统**
 
-## 本阶段要解决什么问题
+从需求规划、项目探索、代码实现，到审查、测试、验证与失败返工，形成一条可持久化、可恢复、受安全边界约束的软件开发闭环。
 
-单个 Agent 同时规划、读项目、写代码、审查和测试时，很容易职责混乱，也容易越权执行副作用。本项目把工作拆成明确角色：
+<p>
+  <img src="https://img.shields.io/badge/STATUS-COMPLETED-22C55E?style=for-the-badge" alt="Status: Completed" />
+  <img src="https://img.shields.io/badge/PYTHON-3.10%2B-3776AB?style=for-the-badge&amp;logo=python&amp;logoColor=white" alt="Python 3.10+" />
+  <img src="https://img.shields.io/badge/LANGGRAPH-1.2-6C5CE7?style=for-the-badge" alt="LangGraph 1.2" />
+  <img src="https://img.shields.io/badge/LANGCHAIN-1.3-1C3C3C?style=for-the-badge&amp;logo=langchain&amp;logoColor=white" alt="LangChain 1.3" />
+</p>
 
-```text
-Main Agent（项目经理）
-├── Planner（制定计划）
-├── Explorer（调查项目事实）
-├── Implementer（提出文件修改）
-├── Reviewer（静态代码审查）
-├── Tester（运行受控功能测试，已接入 Graph）
-└── Verifier（最终核验，已接入 Graph）
-```
+<p>
+  <img src="https://img.shields.io/badge/PYDANTIC-2.13-E92063?style=flat-square&amp;logo=pydantic&amp;logoColor=white" alt="Pydantic 2.13" />
+  <img src="https://img.shields.io/badge/MODEL-QWEN--PLUS-6F42C1?style=flat-square" alt="Qwen Plus" />
+  <img src="https://img.shields.io/badge/STATE-SQLITE-003B57?style=flat-square&amp;logo=sqlite&amp;logoColor=white" alt="SQLite Checkpoint" />
+  <img src="https://img.shields.io/badge/MCP-EXA-FF6B6B?style=flat-square" alt="Exa MCP" />
+  <img src="https://img.shields.io/badge/PACKAGE-UV-DE5FE9?style=flat-square&amp;logo=uv&amp;logoColor=white" alt="uv" />
+</p>
 
-Main Agent 加上六个专业 Subagent，一共是七个 Agent。七个角色已经接入项目级 LangGraph；Reviewer、Tester、Verifier 三个质量门通过后，Verifier Main 会把状态置为 `completed`，Main Agent 再输出最终汇总。
+[项目概览](#overview) · [系统架构](#architecture) · [核心能力](#features) · [快速开始](#quick-start) · [质量保障](#quality-gates) · [验证结果](#verification) · [目录结构](#structure)
 
-所有 Agent 共用真实 `qwen-plus`，但拥有不同的 System Prompt、职责和输入上下文。它们不会自动共享前面发生的事情；当前由 `langgraph_main.py` 启动项目级 LangGraph，通过 `MultiAgentState` 显式传递计划、报告、代码版本和项目快照。
+[返回 LangChain 学习项目](https://github.com/yuanimperialhal/Langchain_Learing)
 
-## 目标完整工作流
+</div>
 
-本项目最终采用“三个串行质量门，每个后续质量门失败后都从 Reviewer 重新开始”的流程。
+> [!IMPORTANT]
+> 本项目更准确的定位是 **Multi-Agent Workflow / Multi-Agent Orchestration**：由 Main Agent 与 Planner、Explorer、Implementer、Reviewer、Tester、Verifier 六个专业 Agent 组成 **7-Agent 协作架构**。它不是调用 DeepAgents `task` Tool 的 Subagent 机制，而是直接使用 LangGraph、State 与条件路由搭建的一套 Multi-Agent Harness。
 
-```text
-用户任务
-→ Main Agent
-→ Planner
-→ Main Agent
-→ Explorer
-→ Main Agent
-→ Implementer
-→ Python 受控写入
+<a id="overview"></a>
 
-→ Reviewer 质量门
-   ├─ 失败：Reviewer 报告 Main
-   │        → Main 委派 Implementer 修复
-   │        → 修复后重新进入 Reviewer
-   │        → 循环直到 Reviewer 通过
-   └─ 通过：Main 保留 Reviewer 报告
-            → 进入 Tester
+## 项目概览
 
-→ Tester 质量门
-   ├─ 失败：Tester 报告 Main
-   │        → Main 委派 Implementer 修复
-   │        → 从 Reviewer 重新开始
-   │        → Reviewer 通过后再次进入 Tester
-   └─ 通过：Main 保留 Tester 报告
-            → 进入 Verifier
+单个 Agent 同时负责规划、调查、编码、审查和测试时，容易出现职责混乱、上下文污染与副作用失控。本项目将软件开发流程拆成七个职责独立的 Agent，并把关键控制权交给确定性的 Python 代码：
 
-→ Verifier 质量门
-   ├─ 失败：Verifier 报告 Main
-   │        → Main 委派 Implementer 修复
-   │        → 从 Reviewer 重新开始
-   │        → 依次重新通过 Reviewer、Tester、Verifier
-   └─ 通过：Main 汇总 Reviewer、Tester、Verifier 三份报告
-            → 编写最终报告
-            → 项目结束
-```
+- **Agent 负责语义工作**：理解需求、制定计划、调查事实、生成修改和判断质量。
+- **Pydantic 负责交接契约**：约束文件修改、审查结论、测试报告与最终验证。
+- **Python 负责确定性控制**：执行路径检查、文件写入、白名单测试和条件路由。
+- **LangGraph 负责流程编排**：管理状态、质量门、有限返工循环与最终出口。
 
-这张图已经同时是当前成功主线的实际架构。规划阶段有限重规划、Reviewer 有限修复、Tester 失败回退，以及 Reviewer → Tester → Verifier → Main → `completed` 的完整成功路线都已有真实运行证据。后续自定义需求的最终状态还记录了 `tester_repair_count=1` 和 `verifier_repair_count=1`，最终仍收敛到 `completed`。
+### 为什么值得做
 
-## 当前已经跑通的流程
+| 传统单 Agent 的问题 | 本项目的处理方式 |
+| --- | --- |
+| 一个 Prompt 包办所有职责 | 七个独立角色、独立 Prompt、独立输入边界 |
+| 自然语言交接容易丢失事实 | `MultiAgentState` + Pydantic 结构化契约 |
+| 模型直接写文件、执行命令风险高 | Writer 与 Runner 受 Python 安全层控制 |
+| “看起来正确”就结束 | Reviewer → Tester → Verifier 三重质量门 |
+| 失败后无限循环或无序重试 | 每类返工都有计数上限和明确失败出口 |
+| 会话和项目之间互相污染 | `thread_id` 会话隔离 + `project_id` 项目隔离 |
 
-先前的聚焦质量门验收真实触发过 Tester 失败路线：
+### 当前完成度
 
 ```text
-Reviewer 通过
-→ Tester 调用 python_project_tests
-→ 项目没有 tests/test_*.py
-→ Runner 返回 exit_code=2
-→ TesterReport.passed=false
-→ test_main 返回 Implementer，tester_repair_count=1/3
-→ Implementer 创建并修复 tests/test_todo.py
-→ Reviewer 再次通过
-→ Tester 真实执行 15 个 unittest
-→ TesterReport.passed=true
-→ test_main 将下一站设为 Verifier
+Stage 9       [■■■■■]  Core Multi-Agent Harness
+Stage 9 Plus  [■■■■■]  Memory · Multi-project · ToolRegistry · Exa MCP
+Status        completed
 ```
 
-随后最新一次完整真实入口跑通了成功主线：
+核心 Harness、连续聊天、SQLite Checkpoint、滚动摘要、多项目管理、本地 Tool 自动发现、中央 ToolRegistry、Exa 远程 MCP，以及按角色最小权限注入均已完成验收。
 
-```text
-Planner 第 1 版计划通过
-→ Explorer 批准
-→ Implementer 受控写入
-→ ReviewerReport.passed=true
-→ Tester 实际执行 17 项 unittest，全部通过
-→ Verifier 逐项确认新增、查看和完成三个需求
-→ VerifierReport.passed=true
-→ Main Agent 输出最终汇总
-→ phase=completed
-→ status=completed
-→ next_role=None
-→ verifier_passed=True
+<a id="architecture"></a>
+
+## 系统架构
+
+### 7-Agent 职责拓扑
+
+```mermaid
+flowchart TB
+    USER([用户需求]) --> MAIN
+
+    MAIN[Main Agent<br/>编排 · 委派 · 汇总]
+    PLANNER[Planner<br/>计划拆解]
+    EXPLORER[Explorer<br/>事实调查]
+    IMPLEMENTER[Implementer<br/>提出文件修改]
+    REVIEWER[Reviewer<br/>静态代码审查]
+    TESTER[Tester<br/>受控功能测试]
+    VERIFIER[Verifier<br/>最终需求验收]
+
+    MAIN --> PLANNER
+    MAIN --> EXPLORER
+    MAIN --> IMPLEMENTER
+    MAIN --> REVIEWER
+    MAIN --> TESTER
+    MAIN --> VERIFIER
+
+    PLANNER -. 计划 .-> MAIN
+    EXPLORER -. 调查报告 .-> MAIN
+    IMPLEMENTER -. FileChange .-> MAIN
+    REVIEWER -. ReviewerReport .-> MAIN
+    TESTER -. TesterReport .-> MAIN
+    VERIFIER -. VerifierReport .-> MAIN
+
+    classDef main fill:#4f46e5,color:#fff,stroke:#312e81,stroke-width:2px;
+    classDef agent fill:#f5f3ff,color:#312e81,stroke:#8b5cf6;
+    classDef user fill:#fff7ed,color:#9a3412,stroke:#fb923c;
+    class MAIN main;
+    class PLANNER,EXPLORER,IMPLEMENTER,REVIEWER,TESTER,VERIFIER agent;
+    class USER user;
 ```
 
-这次固定任务运行中 `plan_revision=1`、`replan_count=0`，Reviewer、Tester、Verifier 三类修复计数均为 `0`。它证明 Verifier Node、Verifier Main、最终状态和成功出口实际执行过，而不是只存在于 Graph 定义中。
+七个角色都拥有独立职责、Prompt 和执行逻辑。模型统一由 `llm.py` 创建，当前使用 `ChatTongyi(model="qwen-plus", temperature=0)`；角色之间不会隐式共享记忆，所需事实由 Graph State 显式传递。
 
-随后，终端输入的自定义需求也真实跑通：
+### 实际工作流与返工闭环
 
-```text
-plan_revision: 3
-replan_count: 2
-plan_approved: True
-phase: completed
-status: completed
-next_role: None
-review_repair_count: 0
-tester_repair_count: 1
-max_tester_repairs: 3
-verifier_repair_count: 1
-max_verifier_repairs: 3
-verifier_passed: True
+```mermaid
+flowchart TD
+    START([开始]) --> P[Planner]
+    P --> E[Explorer]
+    E --> PG{Planning Main}
+    PG -- 需要重规划 --> P
+    PG -- 计划通过 --> I[Implementer]
+
+    I --> R[Reviewer]
+    R --> RG{Review Main}
+    RG -- 不通过 --> I
+    RG -- 通过 --> T[Tester]
+
+    T --> TG{Test Main}
+    TG -- 不通过 --> I
+    TG -- 通过 --> V[Verifier]
+
+    V --> VG{Verifier Main}
+    VG -- 不通过 --> I
+    VG -- 需求满足 --> DONE([completed])
+
+    PG -. 次数耗尽 .-> FAILED([failed])
+    RG -. 次数耗尽 .-> FAILED
+    TG -. 次数耗尽 .-> FAILED
+    VG -. 次数耗尽 .-> FAILED
+
+    classDef agent fill:#eef2ff,color:#312e81,stroke:#6366f1;
+    classDef gate fill:#fff7ed,color:#9a3412,stroke:#f97316;
+    classDef success fill:#ecfdf5,color:#166534,stroke:#22c55e;
+    classDef failed fill:#fef2f2,color:#991b1b,stroke:#ef4444;
+    class P,E,I,R,T,V agent;
+    class PG,RG,TG,VG gate;
+    class DONE success;
+    class FAILED failed;
 ```
 
-这份结果证明动态输入不是只通过语法检查，而是已经进入真实 Multi-Agent Graph；任务经历重新规划、Tester 返工和 Verifier 返工后，最终通过全部质量门。第九阶段 Harness 随后从阶段目录运行本地回归测试，`10` 项全部通过。2026-08-29 的离线复查中，`practice_sandbox` 内待办和记账项目共 `32` 项功能测试通过。
+后续任一质量门失败，都会回到 Implementer 修复，并从 Reviewer 开始重新通过后续质量门。这样可以避免新修复破坏已经审查或测试过的行为。
 
-Reviewer、Tester、Verifier 报告既保留在 Graph State 中，也会按 `project_id + thread_id` 写入独立磁盘目录；Graph 状态和会话历史由项目自己的 SQLite Checkpoint 持久化。
+### 四层工程边界
 
-## 当前目录结构
+```mermaid
+flowchart LR
+    A[Agent Layer<br/>理解 · 规划 · 调查 · 判断]
+    C[Contract Layer<br/>Pydantic 结构化契约]
+    S[Safety Layer<br/>路径 · 写入 · 测试白名单]
+    W[Workflow Layer<br/>State · Routing · Checkpoint]
 
-```text
-hands_on/09_multi_agent_harness/
-├── .env                         # 本地 DASHSCOPE_API_KEY，不提交 Git
-├── README.md                    # 第九阶段学习记录
-├── llm.py                       # 创建所有 Agent 共用的 qwen-plus
-├── main.py                      # 早期普通 Python 顺序编排入口
-├── langgraph_main.py            # 终端动态输入与项目级 LangGraph 运行入口
-├── chat_cli.py                  # 选择 project_id、thread_id 并连续输入任务
-├── checkpoint_reader.py         # 按项目和会话读取 SQLite 存档
-├── project_manager.py           # 项目目录、ID 校验和进程锁
-├── report_store.py              # 三份质量报告持久化
-├── pyproject.toml               # 阶段独立依赖
-├── uv.lock                      # 锁定依赖
-├── agents/
-│   ├── main_agent/              # Main Agent
-│   ├── planner/                 # Planner Agent
-│   ├── explorer/                # Explorer Agent
-│   ├── implementer/             # Implementer Agent
-│   ├── reviewer/                # Reviewer Agent
-│   ├── tester/                  # Tester Agent，已接入 Graph
-│   └── verifier/                # Verifier Agent，已接入 Graph
-├── contracts/
-│   ├── __init__.py
-│   ├── file_change.py           # FileChange 结构化写入契约
-│   ├── explorer_report.py       # ExplorerReport
-│   └── quality_report.py        # 三个质量门的结构化报告
-├── safety/
-│   ├── __init__.py
-│   ├── reader.py                # 受控项目读取
-│   ├── route_guard.py           # 沙箱路径边界校验
-│   ├── writer.py                # create / replace 受控写入
-│   ├── test_runner.py           # Tester 白名单测试工具入口
-│   └── project_test_harness.py  # 通用 Python 项目测试协议
-├── workflow/
-│   ├── __init__.py
-│   ├── state.py                 # MultiAgentState
-│   ├── nodes.py                 # Node 构造与依赖注入入口
-│   ├── node_handlers/           # 按角色拆分的 Node 实现
-│   │   ├── common.py            # 递归生成项目快照
-│   │   ├── planner.py
-│   │   ├── explorer.py
-│   │   ├── implementer.py
-│   │   ├── reviewer.py
-│   │   ├── tester.py
-│   │   ├── verifier.py
-│   │   └── main.py              # planning/review/test/verifier 四个 Main Node
-│   ├── routes.py                # 路由模块预留
-│   └── graph.py                 # StateGraph、条件边和循环出口
-├── tests/
-│   ├── test_main_nodes.py
-│   ├── test_planning_loop.py
-│   ├── test_project_snapshot.py
-│   ├── test_quality_gate_routing.py
-│   ├── test_safe_reader.py
-│   ├── test_test_runner.py
-│   ├── test_tester_prompt.py
-│   ├── test_implementer_prompt.py
-│   ├── test_conversation_history.py
-│   ├── test_conversation_summary.py
-│   ├── test_project_manager.py
-│   ├── test_project_runtime.py
-│   └── test_report_store.py
-└── practice_sandbox/
-    ├── projects/<project_id>/   # 各项目独立源码目录，运行时按需创建
-    ├── data/projects/<project_id>/
-    │   ├── checkpoint.db        # 项目自己的任务档案
-    │   └── reports/<thread_id>/ # 当前会话的三份质量报告
-    └── ...                      # 早期单项目练习产物
+    A --> C --> S --> W
+    W -. 状态与证据 .-> A
+
+    classDef layer fill:#f8fafc,color:#0f172a,stroke:#64748b;
+    class A,C,S,W layer;
 ```
 
-Tester、Verifier、白名单 Runner、通用 Python 测试协议和三个质量门都已接入当前 Graph。Tester 通过后进入 Verifier；Verifier 通过后由 `verifier_main` 写入 `completed`，失败时按有限计数返回 Implementer 或进入明确失败出口。
+<a id="features"></a>
 
-## 分层架构
+## 核心能力
 
-项目不是让大模型直接控制一切，而是分成四层：
+| 能力 | 实现 | 价值 |
+| --- | --- | --- |
+| 7-Agent 协作 | Main + 6 个专业 Agent | 职责分离，减少 Prompt 污染 |
+| 有限规划循环 | Planner ↔ Explorer ↔ Planning Main | 计划基于项目事实迭代 |
+| 三重质量门 | Reviewer → Tester → Verifier | 分别覆盖静态质量、真实测试和需求验收 |
+| 结构化交接 | `FileChange`、`GateFinding`、三类 Report | 输出可校验，可作为路由依据 |
+| 安全副作用 | 路径解析、受控 Writer、白名单 Runner | 模型提出建议，Python 决定是否执行 |
+| 连续会话 | `thread_id` + SQLite Checkpoint | 重启后继续原任务，不同会话相互隔离 |
+| 上下文压缩 | 滚动摘要 + 最近消息 + 结构化 State | 长会话不必反复携带全部原文 |
+| 多项目管理 | `project_id` + 独立目录 + 进程锁 | 隔离源码、状态和报告，避免并发覆盖 |
+| 可扩展工具平台 | 自动发现 + `ToolRegistry` | 新本地 Tool 无需修改 Agent 源码 |
+| 远程研究能力 | Exa Streamable HTTP MCP | 白名单搜索与网页读取，外部内容按不可信数据处理 |
+| 最小权限注入 | 按角色发放 Tool | 每个 Agent 只能获得完成职责所需的能力 |
 
-```text
-Agent 层
-  负责理解任务、规划、调查、生成修改和语义审查
+### Agent 职责与边界
 
-Contract 层
-  把 Agent 的关键输出约束成可校验的 Pydantic 对象
-
-Safety 层
-  校验路径与操作类型，执行真正的文件系统副作用
-
-Workflow 层
-  决定 Agent 顺序、质量门、回退路线和结束条件
-```
-
-当前 Agent、Contract、受控写入、受控测试和 Workflow 已接通到 Verifier 与最终 Main 汇总。`workflow/graph.py` 使用 `StateGraph` 注册节点和条件边，`workflow/state.py` 保存跨节点状态，`workflow/node_handlers/` 按角色实现节点行为，`workflow/nodes.py` 负责组装节点，`langgraph_main.py` 负责接收终端需求、构造初始状态并启动工作流。
-
-Node 工程化拆分和成功主线已经完成。当前重点不再是增加 Agent，而是补齐 Verifier 失败路线的真实验收、修复旧回归测试，并逐步增加动态交互、记忆、项目隔离和统一能力库。
-
-## Agent 职责与边界
-
-| 角色 | 当前职责 | 输出方式 | 禁止事项 |
+| 角色 | 核心职责 | 结构化输出 / 工具 | 明确边界 |
 | --- | --- | --- | --- |
-| Main Agent | 整理委派说明、接收报告、表达下一站 | 普通消息 | 不直接写业务代码或文件 |
-| Planner | 把目标拆成三个可执行步骤 | 普通消息 | 不读取项目、不写代码、不改文件 |
-| Explorer | 根据 Python 提供的快照报告现状与缺失 | 普通消息 | 不猜测快照外事实、不代替 Planner |
-| Implementer | 每轮提出一项完整文件修改 | `FileChange` Tool 参数 | 不直接访问文件系统、不删除文件 |
-| Reviewer | 根据目标、报告、修改和最新源码做静态审查 | `ReviewerReport` Tool artifact | 不修改文件、不伪称测试通过 |
-| Tester | 选择并运行预先允许的项目测试，再结合真实输出判断需求是否被覆盖 | `TesterReport` Tool artifact | 不能运行任意命令，不能把“零测试”判为通过 |
-| Verifier | 最终核对目标、最新代码和前两份质量报告 | `VerifierReport` Tool artifact | 不能跳过 Reviewer、Tester，也不能脱离证据宣称需求满足 |
+| Main Agent | 编排任务、整理委派信息、汇总最终结果 | 普通消息 | 不直接修改业务文件 |
+| Planner | 将目标拆成可执行计划 | 普通消息；可使用受限研究工具 | 不写代码、不执行副作用 |
+| Explorer | 根据项目快照与必要研究报告事实 | `ExplorerReport` | 不猜测快照之外的项目事实 |
+| Implementer | 每轮提出一项完整文件修改 | `FileChange` | 不直接访问文件系统、不删除文件 |
+| Reviewer | 基于最新源码进行静态审查 | `ReviewerReport` | 不修改文件、不伪称测试通过 |
+| Tester | 选择并运行白名单测试，判断需求覆盖 | `TesterReport` | 不能运行任意 Shell 命令 |
+| Verifier | 综合目标、源码与前两份报告最终验收 | `VerifierReport` | 不能跳过审查或脱离证据下结论 |
 
-Main Agent 负责“理解和委派”，但当前真正调用各 Agent、执行写入以及判断 `passed` 分支的是确定性的 Python 主控代码。这种分工让模型负责语义判断，让 Python 负责可验证的控制和副作用。
+### Tool 最小权限矩阵
 
-## 上下文如何交接
+| 角色 | 本地只读 Tool | Exa Search | Exa Fetch | 提交契约 | 测试 Runner |
+| --- | :---: | :---: | :---: | :---: | :---: |
+| Main Agent | — | — | — | — | — |
+| Planner | ✓ | ✓ | ✓ | — | — |
+| Explorer | ✓ | ✓ | ✓ | `ExplorerReport` | — |
+| Implementer | — | — | — | `FileChange` | — |
+| Reviewer | ✓ | — | ✓ | `ReviewerReport` | — |
+| Tester | — | — | — | `TesterReport` | ✓ |
+| Verifier | ✓ | — | ✓ | `VerifierReport` | — |
 
-这些 Agent 没有自动共享记忆。当前各个 Graph Node 会从 `MultiAgentState` 读取所需信息，再明确拼装下一个 Agent 需要的上下文：
+Explorer 在需要外部研究时最多执行三次搜索或网页读取，随后必须提交一份结构化报告。网页内容始终视为不可信数据，不能借此绕过 Writer、Runner 或角色权限。
 
-```text
-原始用户任务
-＋ Planner 报告
-＋ Explorer 报告
-＋ 本轮 FileChange
-＋ 写入后的当前源码快照
-→ 交给对应 Agent
+<a id="quick-start"></a>
+
+## 快速开始
+
+### 1. 安装依赖
+
+```bash
+cd hands_on/09_multi_agent_harness
+uv sync
 ```
 
-这体现了 Multi-Agent 的一个核心知识：Subagent 不应该默认知道其他 Agent 做过什么；主控程序必须决定传递哪些事实，避免上下文遗漏，也避免把无关内容全部塞给每个 Agent。
+### 2. 配置环境变量
 
-## 结构化交接契约
-
-### `FileChange`
-
-Implementer 不返回一段模糊的“我改好了”，而是提交：
-
-| 字段 | 含义 |
-| --- | --- |
-| `relative_path` | 相对于 `practice_sandbox` 的目标路径 |
-| `operation` | 只能是 `create` 或 `replace` |
-| `content` | 目标文件的完整内容 |
-| `rationale` | 本次修改理由 |
-
-数据流：
-
-```text
-Implementer 生成工具调用参数
-→ Python 提取 AIMessage.tool_calls
-→ Pydantic 校验为 FileChange
-→ Safety 层决定是否允许写入
-```
-
-每轮必须且只能提交一个 `FileChange`，当前也只允许修改一个文件。
-
-### `GateFinding`
-
-Reviewer 的每个问题都必须包含：
-
-- `category`：问题类别。
-- `severity`：只能是 `blocking` 或 `advisory`。
-- `message`：问题说明。
-- `evidence`：来自当前源码的证据。
-- `suggested_fix`：建议修复方式。
-
-这些必填字段防止 Reviewer 只给结论却不给证据或修复方向。
-
-### `ReviewerReport`
-
-ReviewerReport 包含：
-
-| 字段 | 含义 |
-| --- | --- |
-| `passed` | Reviewer 质量门是否通过 |
-| `revision` | 当前产物版本，必须大于等于 1 |
-| `findings` | `GateFinding` 列表 |
-
-Pydantic 还会检查报告内部是否自相矛盾：
-
-```text
-存在 blocking finding
-→ passed 不能是 true
-
-passed 是 false
-→ 至少必须有一个 blocking finding
-```
-
-## `AIMessage` 与 `ToolMessage`
-
-当前两个结构化 Agent 的提取方式不同：
-
-```text
-Implementer
-→ 模型在 AIMessage.tool_calls 中提出 submit_file_change 参数
-→ Python 从工具调用参数构造 FileChange
-
-Reviewer
-→ submit_reviewer_report 工具校验并返回 content + artifact
-→ LangChain 产生 ToolMessage
-→ Python 从成功的 ToolMessage.artifact 构造 ReviewerReport
-```
-
-因此 Implementer 提取器检查 `AIMessage`，Reviewer 提取器检查 `ToolMessage`。把 Reviewer 的工具结果误当成 `AIMessage`，会导致明明已经成功调用工具，提取器仍然找到 0 份报告。
-
-## Python 受控写入
-
-Implementer 只能提出 `FileChange`，真正的写入经过下面的确定性边界：
-
-```text
-FileChange
-→ resolve_sandbox_path()
-→ 检查是否为相对路径
-→ resolve() 解析最终绝对路径
-→ relative_to() 确认仍在 practice_sandbox 内
-→ 检查 create / replace 前置条件
-→ UTF-8 写入
-```
-
-已经实现的规则：
-
-- 拒绝绝对路径和带盘符的路径。
-- 拒绝通过 `../` 逃出 `practice_sandbox`。
-- 拒绝把沙箱根目录本身当作目标文件。
-- `create` 遇到已存在目标时失败，防止静默覆盖。
-- `replace` 要求目标必须是已存在的文件。
-- 不支持 `delete`。
-- Python 校验完成前，Implementer 的内容不会写入磁盘。
-
-这个设计的核心是：模型可以建议副作用，但只有 Python 安全层有权执行副作用。
-
-## Reviewer 质量门
-
-Reviewer 收到的不是单独一段代码，而是完整审查上下文：
-
-```text
-原始用户任务
-＋ Planner 报告
-＋ Explorer 报告
-＋ 本轮 FileChange
-＋ 写入后的项目源码快照
-＋ artifact revision
-→ ReviewerReport
-```
-
-Reviewer 只做静态审查。它会检查功能缺失、逻辑错误、异常处理和任务越界，并把问题分成：
-
-- `blocking`：影响需求、正确性或安全，质量门不能通过。
-- `advisory`：改进建议，不阻止进入下一质量门。
-
-本次真实运行的 ReviewerReport 通过了 Pydantic 校验，`passed=true`，所以 Python 选择 Tester 路线。
-
-## Tester 质量门
-
-Tester 不只是检查 Python 能不能编译，也不只测试某一种待办项目。它面向 Implementer 产出的任意 Python 项目，工作过程是：
-
-```text
-原始用户任务 + 已批准计划 + 当前项目快照 + artifact revision
-→ Tester 选择固定的 python_project_tests
-→ Python Runner 递归编译项目中的 .py 文件
-→ 从 tests/test_*.py 发现并执行 unittest
-→ Tester 根据真实退出码、输出和需求覆盖情况生成 TesterReport
-```
-
-安全边界和通过条件：
-
-- Agent 只能传入白名单 `test_id`，不能拼接 Shell 命令。
-- Runner 使用 `shell=False`，在项目沙箱内运行，并设置 `10` 秒超时。
-- 任意 Python 文件语法失败返回 `exit_code=3`。
-- 没有发现功能测试返回 `exit_code=2`，不能把“零测试”当成通过。
-- 测试断言失败返回 `exit_code=1`；全部通过才返回 `exit_code=0`。
-- `TesterReport.revision` 必须等于当前 `artifact_revision`；存在失败结果或 `blocking` finding 时，`passed` 不能为 `true`。
-- Tester 还要判断测试是否覆盖原始需求。命令成功只证明已执行的测试通过，不自动证明项目所有功能都正确。
-
-## Verifier 质量门
-
-Verifier 是最后一个需求验收角色。它不重新运行任意命令，而是读取原始任务、当前项目快照、代码版本、ReviewerReport 和 TesterReport，再逐项判断需求是否同时具有实现证据和测试证据：
-
-```text
-原始用户任务 + 当前项目快照 + artifact revision
-＋ ReviewerReport + TesterReport
-→ Verifier 逐条核对需求
-→ 输出结构化 VerifierReport
-→ verifier_main 根据 passed 和修复次数决定完成、返工或失败
-```
-
-当前 Python 主控会检查 `VerifierReport.revision` 必须等于最新 `artifact_revision`。成功时写入 `phase=completed`、`status=completed`、`next_role=None`；失败且未达到上限时返回 Implementer，随后重新经过 Reviewer、Tester 和 Verifier；达到上限时进入明确的 `failed` 出口。
-
-最新一次真实成功主线中，Verifier 分别核对了新增、查看和完成三个待办需求，给出 `passed=true`，随后 Main Agent 输出最终汇总。失败返工和上限耗尽虽然已经写入 Graph 与 Python 路由，但尚未用真实 Verifier 失败报告完成验收。
-
-## Workflow State 与当前 Graph
-
-`workflow/state.py` 的 `MultiAgentState` 已经用于当前 LangGraph，主要保存：
-
-- 阶段：`planning`、`exploring`、`implementing`、`reviewing`、`testing`、`verifying`、`completed`、`failed`。
-- 角色：Main、Planner、Explorer、Implementer、Reviewer、Tester、Verifier。
-- 产物信息：`artifact_revision`、`changed_files`、`pending_file_changes`。
-- 当前报告：Explorer、Reviewer、Tester 和 Verifier 报告。
-- 循环计数：`replan_count`、`review_repair_count`、`tester_repair_count`、`verifier_repair_count` 及各自上限。
-
-当前 Graph 已接入 `planner`、`explorer`、`planning_main`、`implementer`、`reviewer`、`review_main`、`tester`、`test_main`、`verifier` 和 `verifier_main`。规划失败会有限返回 Planner；Reviewer、Tester 或 Verifier 失败都会有限返回 Implementer，并从 Reviewer 重新经过后续质量门；Verifier 通过后进入 `completed`，所有失败出口最终进入 `END`。
-
-## 本阶段已经学到的知识
-
-- Multi-Agent 的重点不是 Agent 数量，而是职责边界和可靠交接。
-- Main Agent 负责协调，不应该亲自包办所有专业工作。
-- 每个 Subagent 只接收完成本职工作所需的上下文。
-- 普通文本适合计划和事实报告；会驱动副作用或质量路由的输出应结构化。
-- Pydantic 不只检查字段类型，还能检查报告内部业务规则。
-- 模型负责语义判断，Python 负责路径、写入和分支等确定性控制。
-- `AIMessage.tool_calls` 表示模型请求调用工具；`ToolMessage` 表示工具执行后的结果。
-- Reviewer 通过只代表静态审查通过，不能替代真实测试。
-- Tester 必须依据 Runner 的真实退出码和输出判断，发现零测试时也必须失败。
-- Tester 报告是修复证据，不是必须照抄的修改命令；Implementer 要先判断失败来自产品代码还是测试代码，不能为了迁就错误测试随意扩展产品 API。
-- 对文件读写功能做测试时，应使用临时目录隔离副作用，不能污染 `practice_sandbox` 的真实数据。
-- Verifier 必须逐条核对用户需求、代码和测试证据，不能因为 Reviewer 与 Tester 都通过就自动通过。
-- `next_role` 只是 State 中的数据，真正的执行路线必须由 `add_conditional_edges()` 映射到对应 Node。
-- 后续质量门失败后从 Reviewer 重跑，可以防止修复一个问题时破坏已经审查过的代码。
-- 质量循环必须有最大修复次数和明确失败出口，不能无限调用模型。
-
-## 当前阶段边界
-
-核心 Harness 和 Stage 9 Plus 已经完成全部约定验收：自定义终端需求真实跑到 `completed`，连续聊天、上下文记忆、多项目管理和 MCP/Tool 能力库全部接通。最终完整回归运行 `73` 项并得到 `OK (skipped=1)`，默认跳过的真实 Exa 集成测试随后显式联网运行并 `1 / 1` 通过。
-
-最终补齐：
-
-- 同一 `thread_id` 通过 SQLite Checkpoint 继续原会话，不同 `thread_id` 相互隔离。
-- Planner 使用“滚动摘要 + 最近需求 + 结构化 State”，避免长对话一直携带全部原文。
-- `project_id` 决定独立的源码目录、Checkpoint 和质量报告目录，所有项目仍位于同一个大 Sandbox 内。
-- 同一项目通过进程锁串行执行，避免两个任务同时覆盖项目产物。
-- Reviewer、Tester、Verifier 三份报告按 `thread_id` 保存为 JSON。
-- 建立 `capabilities/` 专属能力包和中央 `ToolRegistry`，统一登记本地 Tool、现有 Harness Tool 和 MCP Tool，并保存来源、角色权限与超时配置。
-- 自动扫描 `capabilities/local_tools/`；以后新增符合插件契约的本地 Tool 时，不需要修改 Agent 或中央注册表源码。
-- 使用 `MultiServerMCPClient` 连接 Exa 远程 MCP，只加载白名单 `web_search_exa` 和 `web_fetch_exa`，让 Multi-Agent 能够搜索互联网并读取网页。
-- 按 Agent 角色注入最小工具集合，同时保持项目快照、Implementer 安全写入和 Tester 白名单命令的现有 Python 边界，不再重复建设项目文件 MCP。
-- Planner 可按需调用 Exa 搜索和读取网页；Explorer 的搜索与网页读取总计最多三次，之后必须提交一份结构化报告。
-- 毕业项目 `stage9-exa-graduation` 使用同一 `project_id + thread_id=final` 保留失败现场并继续修复，最终得到 `phase=completed`、`status=completed`、`checkpoint_status=completed` 和 `verifier_passed=True`。
-
-项目级 RAG 保留为后续增强，不阻塞第十阶段；配置、结构化日志、恢复、健康检查和可观测性等生产工程内容进入第十阶段“生产级并发与云部署”。Checkpoint 当前会提示 Pydantic 报告类型尚未注册到严格 msgpack 白名单；它不影响本阶段验收，但应在第十阶段通过保存普通字典或显式白名单完成兼容性处理。
-
-## 环境与依赖
-
-`pyproject.toml` 当前声明：
-
-- Python `>=3.10`
-- `dashscope`
-- `langchain`
-- `langchain-community`
-- `langgraph`
-- `langgraph-checkpoint-sqlite`
-- `python-dotenv`
-- `pydantic`
-
-所有 Agent 当前共用：
-
-```python
-ChatTongyi(model="qwen-plus", temperature=0)
-```
-
-真实密钥只允许写在本阶段的 `.env`：
+在当前目录创建仅供本地使用的 `.env`：
 
 ```dotenv
-DASHSCOPE_API_KEY=
+DASHSCOPE_API_KEY=your_dashscope_api_key
+EXA_API_KEY=your_optional_exa_api_key
 ```
 
-`.env` 已被仓库 `.gitignore` 忽略。不得把真实 Key 写入 README、Python 文件、终端截图或 Git 历史。
+> [!CAUTION]
+> `.env` 已被 `.gitignore` 忽略。不要把真实密钥写入 README、Python 文件、终端截图或 Git 历史。
 
-## 运行当前项目
+`DASHSCOPE_API_KEY` 用于 Qwen 模型调用；`EXA_API_KEY` 可选，若设置，只会通过 `x-api-key` 请求头发送。当前工作流启动时需要能够连接 Exa MCP 以加载白名单工具。
 
-```powershell
-cd G:\codextest\LangChain_learning\hands_on\09_multi_agent_harness
-.\.venv\Scripts\python.exe .\chat_cli.py
+### 3. 启动连续任务 CLI
+
+```bash
+uv run python chat_cli.py
 ```
 
-程序会调用多个真实模型 Agent，并可能根据 Implementer 结果在 `practice_sandbox` 内创建或替换文件。`VIRTUAL_ENV` 不匹配提示只是环境选择警告；只要程序继续运行并到达预期输出，就不等于执行失败。
-
-启动后程序会先选择项目和会话档案号，再持续接收需求：
+程序会依次询问：
 
 ```text
 请输入 project_id（直接回车使用 default-project）：
@@ -504,32 +245,129 @@ cd G:\codextest\LangChain_learning\hands_on\09_multi_agent_harness
 请输入需求（输入 exit、quit 或退出,来结束程序）：
 ```
 
-输入一条任务后，`chat_cli.main()` 会把 `user_request`、`project_id` 和 `thread_id` 交给 `run_task()`。任务完成后程序会重新显示输入提示；空输入会要求重新输入，`exit`、`quit`、`退出`、EOF 或 `Ctrl+C` 会结束程序。同一 `project_id + thread_id` 会在下一轮或程序重启后继续原会话；更换 `thread_id` 会得到独立会话，更换 `project_id` 会同时切换源码、Checkpoint 和报告目录。
+- 相同 `project_id + thread_id`：继续同一项目中的原会话。
+- 更换 `thread_id`：创建互相隔离的新会话。
+- 更换 `project_id`：切换源码目录、Checkpoint 和质量报告目录。
+- 输入 `exit`、`quit`、`退出`，或使用 `Ctrl+C`：结束 CLI。
 
-当前已经验证过的 Tester 失败路线：
+### 4. 读取历史存档
 
-```text
-Reviewer 报告不通过
-→ review_main_node 返回 Implementer 修复
-→ 重新写入并再次进入 Reviewer
-
-Reviewer 通过
-→ Tester 运行白名单 python_project_tests
-
-没有测试
-→ Runner exit_code: 2
-→ Tester passed: false
-→ test_main 返回 Implementer（tester_repair_count: 1 / 3）
-
-Implementer 补充或修复测试
-→ 重新经过 Reviewer
-→ Tester 实际执行 15 项 unittest 并全部通过
-→ phase: verifying
-→ status: running
-→ next_role: verifier
+```bash
+uv run python checkpoint_reader.py
 ```
 
-当前已经验证过的自定义动态需求最终状态：
+存档读取器会显示阶段、状态、产物版本、返工次数、会话历史和滚动摘要。
+
+<a id="quality-gates"></a>
+
+## 质量保障
+
+### 结构化交接契约
+
+#### `FileChange`
+
+Implementer 不能只返回“已经改好”，而要提交完整且可校验的修改：
+
+| 字段 | 含义 |
+| --- | --- |
+| `relative_path` | 相对于当前项目沙箱的目标路径 |
+| `operation` | 只允许 `create` 或 `replace` |
+| `content` | 目标文件的完整内容 |
+| `rationale` | 本轮修改理由 |
+
+```text
+Implementer 生成 Tool Call
+→ Python 提取 AIMessage.tool_calls
+→ Pydantic 构造 FileChange
+→ Safety Layer 校验并执行写入
+```
+
+#### `GateFinding` 与质量报告
+
+每个质量问题都必须包含类别、严重程度、问题说明、证据和修复建议。Pydantic 还会检查报告内部一致性：
+
+```text
+存在 blocking finding  → passed 不能为 true
+passed 为 false         → 至少存在一个 blocking finding
+report.revision          → 必须匹配最新 artifact_revision
+```
+
+### Python 受控写入
+
+```text
+FileChange
+→ resolve_sandbox_path()
+→ 拒绝绝对路径、盘符与 ../ 越界
+→ 检查 create / replace 前置条件
+→ 确认目标仍在项目沙箱
+→ UTF-8 写入
+```
+
+已实现的安全规则：
+
+- 拒绝绝对路径、带盘符路径和 `../` 路径逃逸。
+- 拒绝将沙箱根目录本身作为目标文件。
+- `create` 遇到已有目标时失败，防止静默覆盖。
+- `replace` 要求目标必须是已存在文件。
+- 不支持 `delete`；Pydantic 校验完成前不会产生写入。
+
+### 白名单测试 Runner
+
+Tester 只能选择预先登记的 `test_id`，不能拼接 Shell 命令。通用 Python 测试协议会：
+
+1. 递归编译项目中的 `.py` 文件。
+2. 从 `tests/test_*.py` 发现并执行 `unittest`。
+3. 将真实退出码与输出交给 Tester 生成报告。
+
+| 退出码 | 含义 |
+| :---: | --- |
+| `0` | 发现功能测试且全部通过 |
+| `1` | 测试断言失败 |
+| `2` | 没有发现功能测试，禁止“零测试通过” |
+| `3` | Python 源码编译失败 |
+
+Runner 使用 `shell=False`、固定工作目录和超时限制。命令成功只说明已执行的测试通过，Tester 仍需判断这些测试是否覆盖原始需求。
+
+### 会话记忆与项目隔离
+
+```text
+完整历史 → SQLite Checkpoint（负责存档）
+滚动摘要 + 最近消息 + 结构化 State → Agent 工作上下文
+
+project_id
+├── projects/<project_id>/             # 独立源码
+└── data/projects/<project_id>/
+    ├── checkpoint.db                  # 独立状态
+    └── reports/<thread_id>/           # 独立质量报告
+```
+
+同一项目通过进程锁串行运行，避免两个任务同时覆盖产物。即使不同项目使用相同 `thread_id`，它们的源码、Checkpoint 和报告也不会串联。
+
+<a id="verification"></a>
+
+## 验证结果
+
+### 自动化回归
+
+```bash
+uv run python -m unittest discover -s tests -p 'test_*.py'
+```
+
+| 验收项 | 结果 |
+| --- | ---: |
+| Stage 9 完整离线回归 | `73` 项，`OK (skipped=1)` |
+| 真实 Exa MCP 集成测试 | `1 / 1` 通过 |
+| 毕业项目功能测试 | `2 / 2` 通过 |
+| 早期 Harness 稳定回归 | `10 / 10` 通过 |
+| 待办与记账练习项目功能测试 | `32` 项通过 |
+
+默认回归会跳过需要联网的真实 Exa 集成测试；显式联网验收使用：
+
+```bash
+RUN_EXA_INTEGRATION=1 uv run python -m unittest tests.test_exa_integration
+```
+
+### 已验证的动态返工路径
 
 ```text
 plan_revision: 3
@@ -540,120 +378,131 @@ status: completed
 next_role: None
 review_repair_count: 0
 tester_repair_count: 1
-max_tester_repairs: 3
 verifier_repair_count: 1
-max_verifier_repairs: 3
 verifier_passed: True
 ```
 
-这次自定义需求运行经历两次重新规划、一次 Tester 返工和一次 Verifier 返工，Main Agent 最后输出完成汇总。第九阶段 Harness 本地回归测试也已经 `10 / 10` 通过。
+该运行不是静态定义检查：自定义终端需求实际经历两次重新规划、一次 Tester 返工和一次 Verifier 返工，随后重新通过 Reviewer、Tester、Verifier 并收敛到 `completed`。
 
-## Stage 9 Plus 路线
+毕业项目 `stage9-exa-graduation` 复用相同 `project_id + thread_id=final` 保留失败现场并继续修复，最终得到 `phase=completed`、`checkpoint_status=completed` 与 `verifier_passed=True`。
 
-Stage 9 Plus 的四项内容均已在当前 `09_multi_agent_harness` 目录中完成：
+<a id="structure"></a>
+
+## 目录结构
 
 ```text
-[x] 连续聊天
-[x] 上下文记忆
-[x] 多项目管理
-[x] MCP/Tool 毕业项
+09_multi_agent_harness/
+├── assets/
+│   └── stage9-harness-hero.png     # README 横幅
+├── agents/                         # 七个职责独立的 Agent
+│   ├── main_agent/
+│   ├── planner/
+│   ├── explorer/
+│   ├── implementer/
+│   ├── reviewer/
+│   ├── tester/
+│   └── verifier/
+├── capabilities/                   # 统一能力平台
+│   ├── bootstrap.py                # 组装本地、Harness 与远程 Tool
+│   ├── contracts.py                # Tool 注册契约与角色定义
+│   ├── registry.py                 # 自动发现、注册与按角色发放
+│   ├── local_tools/                # 项目内可扩展只读 Tool
+│   └── remote_tools/exa/           # Exa MCP 配置、策略、客户端和桥接
+├── contracts/                      # Pydantic 结构化交接契约
+├── safety/                         # 路径、写入和白名单测试边界
+├── workflow/
+│   ├── state.py                    # MultiAgentState
+│   ├── graph.py                    # StateGraph、条件边和循环出口
+│   ├── nodes.py                    # Node 构造与依赖注入
+│   └── node_handlers/              # 各角色 Node 实现
+├── tests/                          # Harness 自动化回归测试
+├── practice_sandbox/
+│   ├── projects/<project_id>/      # 项目隔离源码目录
+│   └── data/projects/<project_id>/ # Checkpoint 与质量报告
+├── chat_cli.py                     # 连续任务入口
+├── checkpoint_reader.py            # 会话存档读取器
+├── langgraph_main.py               # 项目级 Graph 运行入口
+├── project_manager.py              # 项目解析、ID 校验和进程锁
+├── report_store.py                 # 三份质量报告持久化
+├── llm.py                          # qwen-plus 模型工厂
+├── pyproject.toml
+└── uv.lock
 ```
 
-### 1. 连续聊天
+<details>
+<summary><strong>查看 State、上下文和报告的交接方式</strong></summary>
 
-在当前 `run_task()` 外建立连续输入循环。一次任务完成后不退出，用户可以继续补充要求、开始新任务或输入退出命令；每一轮仍复用现有质量门，不绕过 Planner、Reviewer、Tester 和 Verifier。
+### Graph State
 
-该入口已经在 `chat_cli.py` 中实现并完成真实验收：一轮“每日记账软件”任务经过 Planner、Explorer、Implementer、Reviewer、Tester 和 Verifier 后达到 `completed`，程序随后再次显示输入提示，并能通过 `Ctrl+C` 正常退出。连续输入完成后，跨轮记忆已在下一项中补齐。
+`MultiAgentState` 保存：
 
-### 2. 上下文记忆与压缩
+- 阶段：`planning`、`exploring`、`implementing`、`reviewing`、`testing`、`verifying`、`completed`、`failed`。
+- 角色：Main、Planner、Explorer、Implementer、Reviewer、Tester、Verifier。
+- 产物：`artifact_revision`、`changed_files`、`pending_file_changes`。
+- 报告：Explorer、Reviewer、Tester、Verifier 的当前结构化报告。
+- 计数：规划、审查、测试与验证的返工次数及各自上限。
 
-这一项已经完成。程序使用项目级 SQLite Checkpointer 和 `thread_id` 保存对话、Graph 状态、代码版本与质量报告。完整原始记录负责存档，真正传给 Planner 的工作上下文采用“滚动摘要 + 最近需求 + 结构化状态”：
+### 显式上下文交接
 
 ```text
-完整历史写入 Checkpoint
-→ 计算当前工作上下文大小
-→ 未达到阈值：继续使用当前消息
-→ 达到阈值：用 qwen-plus 更新 conversation_summary
-→ 保留最近若干轮原始消息
-→ Agent 接收 summary + recent_messages + 当前结构化 State
+原始用户任务
+＋ Planner 计划
+＋ Explorer 调查报告
+＋ 本轮 FileChange
+＋ 写入后的最新源码快照
+＋ 当前 artifact_revision
+＋ 已通过的质量报告
+→ 组装下一角色所需的最小上下文
 ```
 
-`user_request`、`project_id`、`sandbox_root`、计划、当前版本、修复计数和最新质量报告继续保留为独立 State 字段，不依赖自然语言摘要驱动 Graph 路由。自动化测试已经覆盖同线程历史累积、不同线程隔离、摘要触发和 Planner 使用摘要与最近需求。
+### `AIMessage` 与 `ToolMessage`
 
-### 3. 多项目管理
+- Implementer 在 `AIMessage.tool_calls` 中提出 `submit_file_change` 参数，Python 据此构造 `FileChange`。
+- 质量报告 Tool 执行后产生 `ToolMessage`，Python 从成功的 `artifact` 中构造对应 Report。
 
-这一项已经完成。所有项目都位于 `practice_sandbox` 这个大 Sandbox 中，但每个 `project_id` 分别拥有 `projects/<project_id>` 源码目录和 `data/projects/<project_id>` 数据目录。每个项目使用独立 SQLite Checkpoint、报告目录和进程锁；即使两个项目使用相同 `thread_id`，状态也不会串联。
+二者不能混用：Tool Call 表示模型请求调用工具，Tool Message 表示工具已经执行并返回结果。
 
-### 4. MCP/Tool 能力库
+</details>
 
-这一毕业项已经完成。它没有重复建设沙箱文件读取，而是让当前 Multi-Agent 同时获得“项目内可扩展的本地 Tool”和“来自外部 MCP 服务的联网能力”。模型仍统一由 `llm.py` 创建；所有新能力平台代码集中放入 `capabilities/`：
+<details>
+<summary><strong>查看 ToolRegistry 与 Exa MCP 设计</strong></summary>
 
-```text
-capabilities/
-├── __init__.py
-├── bootstrap.py              # 组装本地、Harness 与远程 Tool
-├── contracts.py              # AgentRole 与 Tool 注册契约
-├── registry.py               # 自动发现、统一登记和按角色发放
-├── local_tools/
-│   ├── __init__.py
-│   └── text_stats.py         # 第一个无副作用本地 Tool 示例
-└── remote_tools/
-    ├── __init__.py
-    └── exa/
-        ├── __init__.py
-        ├── config.py         # Exa 连接配置与密钥请求头
-        ├── policy.py         # 纯参数校验和不可信内容格式化
-        ├── client.py         # 白名单远程 Tool 加载
-        └── bridge.py         # 异步 MCP Tool 到同步 Graph 的桥接
-```
+本地 Tool 模块通过 `TOOL_REGISTRATIONS` 声明真实 `BaseTool`、来源、允许角色和超时。程序启动时扫描可信的 `capabilities/local_tools/*.py`；增加符合契约的新文件并重启，即可进入注册表，不需要修改各 Agent。
 
-每个 `local_tools/*.py` 模块导出 `TOOL_REGISTRATIONS`，其中声明真实 `BaseTool`、来源、允许角色和超时。程序启动时自动扫描这些可信模块；以后只需增加符合契约的新 Tool 文件，重启程序后即可进入注册表，不需要继续修改各个 Agent。
-
-外部能力使用 Exa 的远程 Streamable HTTP MCP：
+Exa 使用远程 Streamable HTTP MCP，只允许加载：
 
 ```text
-web_search_exa  → 根据关键词搜索互联网
+web_search_exa  → 搜索互联网
 web_fetch_exa   → 读取指定网页正文
 ```
 
-`remote_tools/exa/client.py` 只接受这两个白名单工具。若存在 `EXA_API_KEY`，只通过 `x-api-key` 请求头发送；密钥不能进入源码、URL、日志或 Git。远程异步 Tool 会由 `bridge.py` 包装为当前同步 Graph 可以调用的 Tool，并受到明确超时和返回长度限制。
+远程异步 Tool 由 `bridge.py` 包装为同步 Graph 可调用的 Tool，并受到参数校验、超时与返回长度限制。注册表拒绝重名、空角色、非法超时和非白名单远程 Tool。
 
-中央注册表按照最小权限发放：
+</details>
 
-```text
-Planner      → 联网搜索、网页读取、允许的本地只读 Tool
-Explorer     → 联网搜索、网页读取、本地只读 Tool、提交 ExplorerReport
-Implementer  → 提交 FileChange
-Reviewer     → 网页读取、本地只读 Tool、提交 ReviewerReport
-Tester       → 白名单测试 Runner、提交 TesterReport
-Verifier     → 网页读取、本地只读 Tool、提交 VerifierReport
-Main Agent   → 无直接工具，只负责协调
-```
+## 当前边界与下一阶段
 
-Explorer 的强制报告中间件已经调整：不需要外部资料时可以直接提交报告；需要研究时最多进行三次搜索或网页读取，之后必须且只能提交一份 ExplorerReport。网页内容始终是不可信外部数据，不能把网页中的指令当成系统命令，也不能借此绕过 Writer、Runner 或角色权限。
+Stage 9 与 Stage 9 Plus 已完成。当前仍保留两项明确边界：
 
-验收已经证明：本地 Tool 可以自动发现；新增 Tool 时不修改 Agent 源码也能进入注册表；注册表拒绝重名、空角色和非法超时；各角色拿不到越权工具；Exa 非白名单工具不会进入系统；MCP 连接失败和调用超时会明确报错；当前同步 Graph 能调用远程异步 Tool；真实 Exa MCP 搜索和网页读取 `1 / 1` 通过；完整回归运行 `73` 项并得到 `OK (skipped=1)`。
+- 项目级 RAG 作为后续增强，不阻塞当前阶段完成。
+- SQLite Checkpoint 对自定义 Pydantic 报告可能提示严格 msgpack 白名单警告；当前不影响验收，后续可通过保存普通字典或注册允许类型解决。
 
-第九阶段已经结束。第十阶段按根 README 的原计划进入 FastAPI、异步并发、多用户状态生命周期、Docker 和云部署；项目级 RAG 作为后续增强单独安排。
+第十阶段将继续进入 **FastAPI、异步并发、多用户状态生命周期、Docker 与云部署**，把当前 Harness 从本地工程原型推进到生产级服务。
 
-## 第九阶段完成标准
+## 核心收获
 
-核心 Harness 当前完成情况：
+- Multi-Agent 的价值不在 Agent 数量，而在职责边界、可验证交接与失败恢复。
+- Main Agent 负责编排，不应亲自包办所有专业工作。
+- 会驱动副作用和路由的输出应结构化，不能只依赖自然语言。
+- 模型负责语义判断，Python 负责路径、写入、命令和状态迁移。
+- Reviewer 通过不能代替真实测试；测试通过也不能代替最终需求核验。
+- 每个质量循环都必须有最大次数和明确出口。
+- 外部网页属于不可信输入，联网能力不能扩大 Agent 的文件与命令权限。
 
-- [x] Main 加六个 Subagent 的职责和输入输出边界全部落地。
-- [x] Reviewer、Tester、Verifier 三个质量门在完整真实成功主线中均能通过。
-- [x] 文件写入和测试命令受 Python 安全边界控制。
-- [x] Main Agent 能接收 Verifier 报告、输出最终汇总并将 Graph 置为 `completed`。
-- [x] LangGraph 的节点、条件边、状态和成功结束条件真实运行。
-- [x] 自定义终端需求真实运行到 `completed`，并记录重新规划、Tester 返工和 Verifier 返工。
-- [x] Harness 本地稳定测试 `10 / 10` 通过。
+---
 
-Stage 9 Plus 完成情况：
+<div align="center">
 
-- [x] 连续聊天。
-- [x] 基于 `thread_id` 的持久化上下文记忆与滚动摘要压缩。
-- [x] 基于 `project_id` 的多项目管理、状态隔离、报告落盘与进程锁。
-- [x] 本地 Tool 自动发现、Exa 远程 MCP 搜索/网页读取、中央 ToolRegistry 与 Agent 权限。
+**Stage 9 completed · Built from scratch with LangGraph**
 
-最终完整回归共运行 `73` 项，覆盖核心 Harness、上下文记忆、多项目管理、本地 Tool 自动发现、角色权限、Exa 策略与客户端、同步桥接、Explorer 研究上限以及 Workflow 工具注入，结果为 `OK (skipped=1)`；默认跳过的真实 Exa 集成测试随后显式联网运行并 `1 / 1` 通过。毕业项目功能测试 `2 / 2` 通过，整个第九阶段标记为“已完成”，下一阶段为原定的“生产级并发与云部署”。
-# MultiAgent_Software_Engineering_Harness-NII
+</div>
