@@ -496,6 +496,6 @@ web_fetch_exa   → 读取指定网页正文
 
 <div align="center">
 
-**Stage 9 completed · Built from scratch with LangGraph**
+**Stage completed · Built from scratch with LangGraph**
 
 </div>
