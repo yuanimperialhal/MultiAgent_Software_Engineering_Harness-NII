@@ -480,14 +480,7 @@ web_fetch_exa   → 读取指定网页正文
 
 </details>
 
-## 当前边界与下一阶段
 
-Stage 9 与 Stage 9 Plus 已完成。当前仍保留两项明确边界：
-
-- 项目级 RAG 作为后续增强，不阻塞当前阶段完成。
-- SQLite Checkpoint 对自定义 Pydantic 报告可能提示严格 msgpack 白名单警告；当前不影响验收，后续可通过保存普通字典或注册允许类型解决。
-
-第十阶段将继续进入 **FastAPI、异步并发、多用户状态生命周期、Docker 与云部署**，把当前 Harness 从本地工程原型推进到生产级服务。
 
 ## 核心收获
 
